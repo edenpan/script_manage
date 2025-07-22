@@ -150,10 +150,19 @@ class TemplateRenderer:
             输出文件名 (如: validate_config_dev.py)
         """
         # 获取模板文件名（去掉路径和.j2扩展名）
-        template_name = Path(template_path).stem
+        template_file = Path(template_path).name  # 获取文件名: validate_config.py.j2
         
-        # 生成输出文件名: <模板名>_<分支名>.py
-        output_filename = f"{template_name}_{branch}.py"
+        # 去掉.j2扩展名
+        if template_file.endswith('.j2'):
+            template_file = template_file[:-3]  # 去掉.j2: validate_config.py
+        
+        # 如果文件名以.py结尾，去掉.py然后加上分支名再加.py
+        if template_file.endswith('.py'):
+            base_name = template_file[:-3]  # 去掉.py: validate_config
+            output_filename = f"{base_name}_{branch}.py"
+        else:
+            # 如果不是.py文件，直接加上分支名和.py
+            output_filename = f"{template_file}_{branch}.py"
         
         return output_filename
     

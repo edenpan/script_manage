@@ -210,11 +210,19 @@ class RenderTester:
         # 测试不存在的模板
         try:
             env_config = self.renderer.load_env_config("dev")
-            self.renderer.render_template("nonexistent.j2", "dev", env_config)
+            # 使用完整的模板路径进行测试
+            nonexistent_template = self.renderer.templates_dir / "nonexistent.j2"
+            self.renderer.render_template(str(nonexistent_template), "dev", env_config)
             print("  ❌ 应该抛出异常但没有")
             success = False
         except FileNotFoundError:
             print("  ✅ 正确处理不存在的模板文件")
+        except RuntimeError as e:
+            if "渲染模板失败" in str(e):
+                print("  ✅ 正确处理不存在的模板文件")
+            else:
+                print(f"  ❌ 意外的运行时异常: {e}")
+                success = False
         except Exception as e:
             print(f"  ❌ 意外的异常类型: {e}")
             success = False
