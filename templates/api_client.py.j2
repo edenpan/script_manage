@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+"""
+API客户端配置
+环境: {{ environment }}
+生成时间: {{ generated_time | default('未知') }}
+"""
+
+import requests
+import json
+from typing import Dict, Any, Optional
+from urllib.parse import urljoin
+
+
+class APIClient:
+    """API客户端类"""
+    
+    def __init__(self):
+        """初始化API客户端"""
+        # 环境配置
+        self.environment = "{{ environment }}"
+        self.debug = {{ debug | lower }}
+        
+        # API配置
+        self.base_url = "{{ api.base_url }}"
+        self.timeout = {{ api.timeout | default(30) }}
+        self.max_retries = {{ api.max_retries | default(3) }}
+        
+        # 认证配置
+        {% if api.auth %}
+        self.auth_type = "{{ api.auth.type | default('none') }}"
+        {% if api.auth.type == 'bearer' %}
+        self.auth_token = "{{ api.auth.token | default('') }}"
+        {% elif api.auth.type == 'basic' %}
+        self.auth_username = "{{ api.auth.username | default('') }}"
+        self.auth_password = "{{ api.auth.password | default('') }}"
+        {% endif %}
+        {% else %}
+        self.auth_type = "none"
+        {% endif %}
+        
+        # 请求头配置
+        self.default_headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "ScriptManager/1.0 ({{ environment }})",
+            {% if api.headers %}
+            {% for key, value in api.headers.items() %}
+            "{{ key }}": "{{ value }}",
+            {% endfor %}
+            {% endif %}
+        }
+        
+        # 初始化会话
+        self.session = requests.Session()
+        self.session.headers.update(self.default_headers)
+        
+        # 设置认证
+        self._setup_auth()
+        
+        if self.debug:
+            print(f"[DEBUG] API客户端初始化完成 - 环境: {self.environment}")
+            print(f"[DEBUG] 基础URL: {self.base_url}")
+    
+    def _setup_auth(self):
+        """设置认证"""
+        {% if api.auth %}
+        {% if api.auth.type == 'bearer' %}
+        if self.auth_token:
+            self.session.headers["Authorization"] = f"Bearer {self.auth_token}"
+        {% elif api.auth.type == 'basic' %}
+        if self.auth_username and self.auth_password:
+            from requests.auth import HTTPBasicAuth
+            self.session.auth = HTTPBasicAuth(self.auth_username, self.auth_password)
+        {% endif %}
+        {% endif %}
+        pass
+    
+    def _build_url(self, endpoint: str) -> str:
+        """构建完整URL"""
+        return urljoin(self.base_url, endpoint.lstrip('/'))
+    
+    def _make_request(self, method: str, endpoint: str, **kwargs) -> requests.Response:
+        """发起HTTP请求"""
+        url = self._build_url(endpoint)
+        
+        # 设置超时
+        kwargs.setdefault('timeout', self.timeout)
+        
+        if self.debug:
+            print(f"[DEBUG] {method.upper()} {url}")
+            if 'json' in kwargs:
+                print(f"[DEBUG] 请求数据: {json.dumps(kwargs['json'], indent=2, ensure_ascii=False)}")
+        
+        try:
+            response = self.session.request(method, url, **kwargs)
+            
+            if self.debug:
+                print(f"[DEBUG] 响应状态: {response.status_code}")
+                if response.headers.get('content-type', '').startswith('application/json'):
+                    try:
+                        print(f"[DEBUG] 响应数据: {json.dumps(response.json(), indent=2, ensure_ascii=False)}")
+                    except:
+                        print(f"[DEBUG] 响应内容: {response.text[:200]}...")
+            
+            response.raise_for_status()
+            return response
+            
+        except requests.exceptions.RequestException as e:
+            if self.debug:
+                print(f"[DEBUG] 请求失败: {e}")
+            raise
+    
+    def get(self, endpoint: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """GET请求"""
+        response = self._make_request('GET', endpoint, params=params)
+        return response.json() if response.content else {}
+    
+    def post(self, endpoint: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """POST请求"""
+        response = self._make_request('POST', endpoint, json=data)
+        return response.json() if response.content else {}
+    
+    def put(self, endpoint: str, data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """PUT请求"""
+        response = self._make_request('PUT', endpoint, json=data)
+        return response.json() if response.content else {}
+    
+    def delete(self, endpoint: str) -> Dict[str, Any]:
+        """DELETE请求"""
+        response = self._make_request('DELETE', endpoint)
+        return response.json() if response.content else {}
+    
+    def health_check(self) -> bool:
+        """健康检查"""
+        try:
+            {% if api.health_endpoint %}
+            response = self.get("{{ api.health_endpoint }}")
+            {% else %}
+            response = self.get("/health")
+            {% endif %}
+            
+            if self.debug:
+                print(f"[DEBUG] 健康检查结果: {response}")
+            
+            return True
+        except Exception as e:
+            if self.debug:
+                print(f"[DEBUG] 健康检查失败: {e}")
+            return False
+
+
+# 创建全局API客户端实例
+api_client = APIClient()
+
+
+def get_api_client() -> APIClient:
+    """获取API客户端实例"""
+    return api_client
+
+
+# 环境特定的配置
+{% if environment == 'dev' %}
+# 开发环境配置
+ENABLE_MOCK = True
+MOCK_DELAY = 0.1
+{% elif environment == 'sit' %}
+# 测试环境配置
+ENABLE_MOCK = False
+RATE_LIMIT = 100  # 每分钟请求数限制
+{% elif environment == 'master' %}
+# 生产环境配置
+ENABLE_MOCK = False
+RATE_LIMIT = 1000  # 每分钟请求数限制
+ENABLE_CACHE = True
+CACHE_TTL = 300  # 缓存5分钟
+{% endif %}
+
+
+if __name__ == "__main__":
+    # 测试API客户端
+    client = get_api_client()
+    
+    print(f"环境: {client.environment}")
+    print(f"基础URL: {client.base_url}")
+    print(f"调试模式: {client.debug}")
+    
+    # 执行健康检查
+    if client.health_check():
+        print("✅ API服务正常")
+    else:
+        print("❌ API服务异常")

@@ -10,7 +10,16 @@
     "key": "prod-api-key-secure-abcdef",
     "base_url": "https://api.example.com",
     "timeout": 120,
-    "retry_count": 3
+    "max_retries": 3,
+    "health_endpoint": "/api/health",
+    "auth": {
+      "type": "bearer",
+      "token": "prod-bearer-token-secure-xyz789"
+    },
+    "headers": {
+      "X-Environment": "production",
+      "X-Version": "1.0.0"
+    }
   },
   "cache": {
     "redis_url": "redis://prod-redis.example.com:6379/0",
@@ -31,7 +40,16 @@
   "logging": {
     "level": "WARNING",
     "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    "file": "/var/log/myapp/prod.log"
+    "file": "/var/log/myapp/prod.log",
+    "log_dir": "logs",
+    "log_file": "prod_app.log",
+    "error_log_file": "prod_error.log",
+    "date_format": "%Y-%m-%d %H:%M:%S",
+    "max_size": 50,
+    "backup_count": 20,
+    "console_enabled": false,
+    "file_enabled": true,
+    "error_file_enabled": true
   },
   "environment": "production",
   "debug": false,

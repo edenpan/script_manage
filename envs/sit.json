@@ -10,7 +10,16 @@
     "key": "sit-api-key-67890",
     "base_url": "https://api-sit.example.com",
     "timeout": 60,
-    "retry_count": 5
+    "max_retries": 5,
+    "health_endpoint": "/api/health",
+    "auth": {
+      "type": "bearer",
+      "token": "sit-bearer-token-12345"
+    },
+    "headers": {
+      "X-Environment": "sit",
+      "X-Version": "1.0.0"
+    }
   },
   "cache": {
     "redis_url": "redis://sit-redis.example.com:6379/0",
@@ -31,7 +40,16 @@
   "logging": {
     "level": "INFO",
     "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    "file": "/var/log/myapp/sit.log"
+    "file": "/var/log/myapp/sit.log",
+    "log_dir": "logs",
+    "log_file": "sit_app.log",
+    "error_log_file": "sit_error.log",
+    "date_format": "%Y-%m-%d %H:%M:%S",
+    "max_size": 20,
+    "backup_count": 10,
+    "console_enabled": true,
+    "file_enabled": true,
+    "error_file_enabled": true
   },
   "environment": "testing",
   "debug": false,

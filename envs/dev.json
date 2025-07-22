@@ -10,7 +10,16 @@
     "key": "dev-api-key-12345",
     "base_url": "https://api-dev.example.com",
     "timeout": 30,
-    "retry_count": 3
+    "max_retries": 3,
+    "health_endpoint": "/api/health",
+    "auth": {
+      "type": "bearer",
+      "token": "dev-bearer-token-12345"
+    },
+    "headers": {
+      "X-Environment": "dev",
+      "X-Version": "1.0.0"
+    }
   },
   "cache": {
     "redis_url": "redis://localhost:6379/0",
@@ -31,7 +40,16 @@
   "logging": {
     "level": "DEBUG",
     "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    "file": "/var/log/myapp/dev.log"
+    "file": "/var/log/myapp/dev.log",
+    "log_dir": "logs",
+    "log_file": "dev_app.log",
+    "error_log_file": "dev_error.log",
+    "date_format": "%Y-%m-%d %H:%M:%S",
+    "max_size": 10,
+    "backup_count": 5,
+    "console_enabled": true,
+    "file_enabled": true,
+    "error_file_enabled": true
   },
   "environment": "development",
   "debug": true,

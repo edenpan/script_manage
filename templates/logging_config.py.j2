@@ -1,0 +1,144 @@
+#!/usr/bin/env python3
+"""
+日志配置文件
+环境: {{ environment }}
+调试模式: {{ debug }}
+"""
+
+import logging
+import logging.handlers
+import os
+from pathlib import Path
+
+
+# 日志级别配置
+{% if environment == 'dev' %}
+LOG_LEVEL = logging.DEBUG
+CONSOLE_LOG_LEVEL = logging.DEBUG
+FILE_LOG_LEVEL = logging.DEBUG
+{% elif environment == 'sit' %}
+LOG_LEVEL = logging.INFO
+CONSOLE_LOG_LEVEL = logging.INFO
+FILE_LOG_LEVEL = logging.DEBUG
+{% elif environment == 'master' %}
+LOG_LEVEL = logging.WARNING
+CONSOLE_LOG_LEVEL = logging.ERROR
+FILE_LOG_LEVEL = logging.INFO
+{% else %}
+LOG_LEVEL = logging.INFO
+CONSOLE_LOG_LEVEL = logging.INFO
+FILE_LOG_LEVEL = logging.INFO
+{% endif %}
+
+# 日志目录配置
+LOG_DIR = Path("{{ logging.log_dir | default('logs') }}")
+LOG_DIR.mkdir(exist_ok=True)
+
+# 日志文件配置
+LOG_FILE = LOG_DIR / "{{ logging.log_file | default('app.log') }}"
+ERROR_LOG_FILE = LOG_DIR / "{{ logging.error_log_file | default('error.log') }}"
+
+# 日志格式配置
+{% if debug %}
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s"
+{% else %}
+LOG_FORMAT = "%(asctime)s - %(levelname)s - %(message)s"
+{% endif %}
+
+DATE_FORMAT = "{{ logging.date_format | default('%Y-%m-%d %H:%M:%S') }}"
+
+# 日志轮转配置
+MAX_LOG_SIZE = {{ logging.max_size | default(10) }} * 1024 * 1024  # {{ logging.max_size | default(10) }}MB
+BACKUP_COUNT = {{ logging.backup_count | default(5) }}
+
+
+def setup_logging():
+    """设置日志配置"""
+    
+    # 创建根日志记录器
+    root_logger = logging.getLogger()
+    root_logger.setLevel(LOG_LEVEL)
+    
+    # 清除现有的处理器
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # 创建格式化器
+    formatter = logging.Formatter(LOG_FORMAT, DATE_FORMAT)
+    
+    # 控制台处理器
+    {% if logging.console_enabled | default(true) %}
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(CONSOLE_LOG_LEVEL)
+    console_handler.setFormatter(formatter)
+    root_logger.addHandler(console_handler)
+    {% endif %}
+    
+    # 文件处理器（轮转）
+    {% if logging.file_enabled | default(true) %}
+    file_handler = logging.handlers.RotatingFileHandler(
+        LOG_FILE,
+        maxBytes=MAX_LOG_SIZE,
+        backupCount=BACKUP_COUNT,
+        encoding='utf-8'
+    )
+    file_handler.setLevel(FILE_LOG_LEVEL)
+    file_handler.setFormatter(formatter)
+    root_logger.addHandler(file_handler)
+    {% endif %}
+    
+    # 错误日志处理器
+    {% if logging.error_file_enabled | default(true) %}
+    error_handler = logging.handlers.RotatingFileHandler(
+        ERROR_LOG_FILE,
+        maxBytes=MAX_LOG_SIZE,
+        backupCount=BACKUP_COUNT,
+        encoding='utf-8'
+    )
+    error_handler.setLevel(logging.ERROR)
+    error_handler.setFormatter(formatter)
+    root_logger.addHandler(error_handler)
+    {% endif %}
+    
+    # 环境特定配置
+    {% if environment == 'dev' %}
+    # 开发环境：启用详细日志
+    logging.getLogger().info("开发环境日志配置已加载")
+    {% elif environment == 'sit' %}
+    # 测试环境：平衡详细程度和性能
+    logging.getLogger().info("测试环境日志配置已加载")
+    {% elif environment == 'master' %}
+    # 生产环境：最小化日志输出
+    logging.getLogger().warning("生产环境日志配置已加载")
+    {% endif %}
+
+
+def get_logger(name: str) -> logging.Logger:
+    """获取指定名称的日志记录器"""
+    return logging.getLogger(name)
+
+
+# 自动设置日志
+setup_logging()
+
+# 创建默认日志记录器
+logger = get_logger(__name__)
+
+# 环境信息
+logger.info(f"日志系统初始化完成 - 环境: {{ environment }}")
+logger.info(f"日志级别: {logging.getLevelName(LOG_LEVEL)}")
+logger.info(f"日志目录: {LOG_DIR}")
+logger.info(f"主日志文件: {LOG_FILE}")
+logger.info(f"错误日志文件: {ERROR_LOG_FILE}")
+
+
+if __name__ == "__main__":
+    # 测试日志功能
+    test_logger = get_logger("test")
+    
+    test_logger.debug("这是一条调试信息")
+    test_logger.info("这是一条信息")
+    test_logger.warning("这是一条警告")
+    test_logger.error("这是一条错误")
+    
+    print(f"日志测试完成，请检查日志文件: {LOG_FILE}")
