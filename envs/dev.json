@@ -1,0 +1,39 @@
+{
+  "database": {
+    "host": "localhost",
+    "port": 5432,
+    "name": "myapp_dev",
+    "url": "postgresql://localhost:5432/myapp_dev",
+    "pool_size": 5
+  },
+  "api": {
+    "key": "dev-api-key-12345",
+    "base_url": "https://api-dev.example.com",
+    "timeout": 30,
+    "retry_count": 3
+  },
+  "cache": {
+    "redis_url": "redis://localhost:6379/0",
+    "ttl": 3600,
+    "enabled": true
+  },
+  "features": {
+    "enable_debug": true,
+    "enable_logging": true,
+    "enable_metrics": false,
+    "max_connections": 100
+  },
+  "security": {
+    "secret_key": "dev-secret-key-very-long-and-secure",
+    "jwt_expiry": 86400,
+    "cors_origins": ["http://localhost:3000", "http://localhost:8080"]
+  },
+  "logging": {
+    "level": "DEBUG",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "file": "/var/log/myapp/dev.log"
+  },
+  "environment": "development",
+  "debug": true,
+  "version": "1.0.0-dev"
+}

@@ -1,0 +1,39 @@
+{
+  "database": {
+    "host": "prod-db.example.com",
+    "port": 5432,
+    "name": "myapp_prod",
+    "url": "postgresql://prod-db.example.com:5432/myapp_prod",
+    "pool_size": 20
+  },
+  "api": {
+    "key": "prod-api-key-secure-abcdef",
+    "base_url": "https://api.example.com",
+    "timeout": 120,
+    "retry_count": 3
+  },
+  "cache": {
+    "redis_url": "redis://prod-redis.example.com:6379/0",
+    "ttl": 14400,
+    "enabled": true
+  },
+  "features": {
+    "enable_debug": false,
+    "enable_logging": true,
+    "enable_metrics": true,
+    "max_connections": 500
+  },
+  "security": {
+    "secret_key": "prod-secret-key-extremely-long-and-secure-for-production",
+    "jwt_expiry": 21600,
+    "cors_origins": ["https://app.example.com", "https://www.example.com"]
+  },
+  "logging": {
+    "level": "WARNING",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "file": "/var/log/myapp/prod.log"
+  },
+  "environment": "production",
+  "debug": false,
+  "version": "1.0.0"
+}

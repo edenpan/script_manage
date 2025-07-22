@@ -1,0 +1,39 @@
+{
+  "database": {
+    "host": "sit-db.example.com",
+    "port": 5432,
+    "name": "myapp_sit",
+    "url": "postgresql://sit-db.example.com:5432/myapp_sit",
+    "pool_size": 10
+  },
+  "api": {
+    "key": "sit-api-key-67890",
+    "base_url": "https://api-sit.example.com",
+    "timeout": 60,
+    "retry_count": 5
+  },
+  "cache": {
+    "redis_url": "redis://sit-redis.example.com:6379/0",
+    "ttl": 7200,
+    "enabled": true
+  },
+  "features": {
+    "enable_debug": false,
+    "enable_logging": true,
+    "enable_metrics": true,
+    "max_connections": 200
+  },
+  "security": {
+    "secret_key": "sit-secret-key-very-long-and-secure-for-testing",
+    "jwt_expiry": 43200,
+    "cors_origins": ["https://sit-frontend.example.com"]
+  },
+  "logging": {
+    "level": "INFO",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "file": "/var/log/myapp/sit.log"
+  },
+  "environment": "testing",
+  "debug": false,
+  "version": "1.0.0-sit"
+}

@@ -1,0 +1,254 @@
+#!/usr/bin/env python3
+"""
+数据库配置模块 - development 环境
+自动生成于: 2025-07-22 18:51:55
+版本: 1.0.0-dev
+"""
+
+import os
+import logging
+from typing import Dict, Any, Optional
+from urllib.parse import urlparse
+
+
+# 环境配置
+ENVIRONMENT = "development"
+DEBUG = true
+VERSION = "1.0.0-dev"
+
+# 数据库连接配置
+DATABASE_CONFIG = {
+    "HOST": "localhost",
+    "PORT": 5432,
+    "NAME": "myapp_dev",
+    "URL": "postgresql://localhost:5432/myapp_dev",
+    "POOL_SIZE": 5,
+    "POOL_TIMEOUT": 30,
+    "POOL_RECYCLE": 3600,
+    "ECHO": true,  # SQL日志输出
+}
+
+# 连接池配置
+POOL_CONFIG = {
+    "pool_size": 5,
+    "max_overflow": 10,
+    "pool_timeout": 30,
+    "pool_recycle": 3600,
+    "pool_pre_ping": True,
+}
+
+# 数据库URL模板
+DATABASE_URLS = {
+    "postgresql": "postgresql://user:password@{host}:{port}/{name}",
+    "mysql": "mysql://user:password@{host}:{port}/{name}",
+    "sqlite": "sqlite:///{name}.db",
+}
+
+# 环境特定的数据库设置
+# 开发环境设置
+ENABLE_SQL_LOGGING = True
+ENABLE_QUERY_PROFILING = True
+AUTO_MIGRATE = True
+BACKUP_ENABLED = False
+
+# 查询超时设置
+QUERY_TIMEOUTS = {
+    "short": 5,      # 简单查询
+    "medium": 30,    # 中等复杂查询
+    "long": 120,     # 复杂查询
+    "batch": 300,    # 批处理操作
+}
+
+# 数据库表前缀
+TABLE_PREFIX = "dev_"  # dev_, sit_, pro_
+
+# 连接重试配置
+RETRY_CONFIG = {
+    "max_retries": 3,
+    "retry_delay": 1,
+    "backoff_factor": 2,
+    "max_delay": 60,
+}
+
+
+class DatabaseManager:
+    """数据库管理器"""
+    
+    def __init__(self):
+        """初始化数据库管理器"""
+        self.config = DATABASE_CONFIG.copy()
+        self.pool_config = POOL_CONFIG.copy()
+        self.logger = self._setup_logging()
+        
+    def _setup_logging(self) -> logging.Logger:
+        """设置日志"""
+        logger = logging.getLogger(f"db_manager_{ENVIRONMENT}")
+        
+        if not logger.handlers:
+            handler = logging.StreamHandler()
+            formatter = logging.Formatter(
+                '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+            )
+            handler.setFormatter(formatter)
+            logger.addHandler(handler)
+            
+            if DEBUG:
+                logger.setLevel(logging.DEBUG)
+            else:
+                logger.setLevel(logging.INFO)
+        
+        return logger
+    
+    def get_connection_string(self, db_type: str = "postgresql") -> str:
+        """获取数据库连接字符串
+        
+        Args:
+            db_type: 数据库类型
+            
+        Returns:
+            连接字符串
+        """
+        if db_type in DATABASE_URLS:
+            return DATABASE_URLS[db_type].format(
+                host=self.config["HOST"],
+                port=self.config["PORT"],
+                name=self.config["NAME"]
+            )
+        else:
+            return self.config["URL"]
+    
+    def validate_connection_config(self) -> bool:
+        """验证连接配置"""
+        try:
+            # 解析数据库URL
+            parsed = urlparse(self.config["URL"])
+            
+            if not parsed.scheme:
+                self.logger.error("数据库URL缺少协议")
+                return False
+            
+            if not parsed.hostname:
+                self.logger.error("数据库URL缺少主机名")
+                return False
+            
+            if not parsed.port:
+                self.logger.warning("数据库URL缺少端口，使用默认端口")
+            
+            self.logger.info("数据库连接配置验证通过")
+            return True
+            
+        except Exception as e:
+            self.logger.error(f"数据库连接配置验证失败: {e}")
+            return False
+    
+    def get_table_name(self, base_name: str) -> str:
+        """获取带前缀的表名
+        
+        Args:
+            base_name: 基础表名
+            
+        Returns:
+            完整表名
+        """
+        return f"{TABLE_PREFIX}{base_name}"
+    
+    def get_pool_config(self) -> Dict[str, Any]:
+        """获取连接池配置"""
+        return self.pool_config.copy()
+    
+    def get_query_timeout(self, query_type: str = "medium") -> int:
+        """获取查询超时时间
+        
+        Args:
+            query_type: 查询类型 (short/medium/long/batch)
+            
+        Returns:
+            超时时间（秒）
+        """
+        return QUERY_TIMEOUTS.get(query_type, QUERY_TIMEOUTS["medium"])
+    
+    def should_enable_sql_logging(self) -> bool:
+        """是否启用SQL日志"""
+        return ENABLE_SQL_LOGGING
+    
+    def should_enable_profiling(self) -> bool:
+        """是否启用查询性能分析"""
+        return ENABLE_QUERY_PROFILING
+    
+    def should_auto_migrate(self) -> bool:
+        """是否自动执行数据库迁移"""
+        return AUTO_MIGRATE
+    
+    def get_backup_config(self) -> Dict[str, Any]:
+        """获取备份配置"""
+        return {
+            "enabled": BACKUP_ENABLED,
+            "interval": BACKUP_INTERVAL if BACKUP_ENABLED else None,
+            "retention_days": 30 if ENVIRONMENT == "production" else 7,
+            "compression": True,
+        }
+    
+    def print_config_summary(self):
+        """打印配置摘要"""
+        print(f"\n{'='*60}")
+        print(f"数据库配置摘要 - {ENVIRONMENT.upper()} 环境")
+        print(f"{'='*60}")
+        print(f"版本: {VERSION}")
+        print(f"主机: {self.config['HOST']}:{self.config['PORT']}")
+        print(f"数据库: {self.config['NAME']}")
+        print(f"连接池大小: {self.config['POOL_SIZE']}")
+        print(f"表前缀: {TABLE_PREFIX}")
+        print(f"SQL日志: {'启用' if ENABLE_SQL_LOGGING else '禁用'}")
+        print(f"性能分析: {'启用' if ENABLE_QUERY_PROFILING else '禁用'}")
+        print(f"自动迁移: {'启用' if AUTO_MIGRATE else '禁用'}")
+        print(f"备份: {'启用' if BACKUP_ENABLED else '禁用'}")
+        if BACKUP_ENABLED:
+            print(f"备份间隔: {BACKUP_INTERVAL}秒")
+        print(f"{'='*60}")
+
+
+# 创建全局数据库管理器实例
+db_manager = DatabaseManager()
+
+# 导出常用配置
+__all__ = [
+    "DATABASE_CONFIG",
+    "POOL_CONFIG",
+    "QUERY_TIMEOUTS",
+    "TABLE_PREFIX",
+    "RETRY_CONFIG",
+    "DatabaseManager",
+    "db_manager",
+    "ENVIRONMENT",
+    "DEBUG",
+    "VERSION",
+]
+
+
+def main():
+    """主函数 - 用于测试配置"""
+    print(f"数据库配置模块 - {ENVIRONMENT} 环境")
+    
+    # 验证配置
+    if db_manager.validate_connection_config():
+        print("✅ 数据库配置验证成功")
+    else:
+        print("❌ 数据库配置验证失败")
+        return
+    
+    # 打印配置摘要
+    db_manager.print_config_summary()
+    
+    # 显示连接字符串（隐藏敏感信息）
+    conn_str = db_manager.get_connection_string()
+    safe_conn_str = conn_str.replace(conn_str.split('@')[0].split('://')[-1], '***:***')
+    print(f"\n连接字符串: {safe_conn_str}")
+    
+    # 显示示例表名
+    print(f"\n示例表名:")
+    for table in ["users", "orders", "products"]:
+        print(f"  {table} -> {db_manager.get_table_name(table)}")
+
+
+if __name__ == "__main__":
+    main()
