@@ -1,0 +1,190 @@
+# GitLab CI配置文件 - Jinja2模板自动渲染
+
+stages:
+  - render
+
+variables:
+  # Python版本
+  PYTHON_VERSION: "3.9"
+  # 支持的分支列表
+  SUPPORTED_BRANCHES: "dev sit master"
+
+# 模板渲染任务
+render_templates:
+  stage: render
+  image: python:${PYTHON_VERSION}-slim
+
+  # 仅在指定分支有新增.j2文件时触发
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^(dev|sit|master)$/'
+      changes:
+        - "templates/**/*.j2"
+      when: always
+    - when: never
+  
+  before_script:
+    # 安装系统依赖
+    - apt-get update -qq && apt-get install -y -qq git
+    
+    # 安装Python依赖
+    - pip install --upgrade pip
+    - pip install -r requirements.txt
+    
+    # 配置Git（用于检测文件变更）
+    - git config --global user.email "ci@gitlab.com"
+    - git config --global user.name "GitLab CI"
+    
+    # 获取完整的Git历史（用于diff比较）
+    - git fetch --unshallow || true
+  
+  script:
+    # 检查必要的目录结构
+    - |
+      echo "检查项目结构..."
+      if [ ! -d "templates" ]; then
+        echo "错误: templates目录不存在"
+        exit 1
+      fi
+      
+      if [ ! -d "envs" ]; then
+        echo "错误: envs目录不存在"
+        exit 1
+      fi
+      
+      # 检查当前分支的环境配置文件是否存在
+      if [ ! -f "envs/${CI_COMMIT_BRANCH}.json" ]; then
+        echo "错误: 环境配置文件 envs/${CI_COMMIT_BRANCH}.json 不存在"
+        exit 1
+      fi
+    
+    # 执行模板渲染
+    - |
+      echo "开始渲染模板..."
+      python scripts/render_templates.py --auto --debug
+      
+      # 检查是否有渲染结果
+      if [ -d "rendered/${CI_COMMIT_BRANCH}" ] && [ "$(ls -A rendered/${CI_COMMIT_BRANCH})" ]; then
+        echo "模板渲染成功，生成的文件："
+        ls -la rendered/${CI_COMMIT_BRANCH}/
+      else
+        echo "没有生成渲染文件"
+      fi
+  
+  after_script:
+    # 显示渲染统计信息
+    - |
+      if [ -d "rendered" ]; then
+        echo "=== 渲染结果统计 ==="
+        for branch_dir in rendered/*/; do
+          if [ -d "$branch_dir" ]; then
+            branch_name=$(basename "$branch_dir")
+            file_count=$(find "$branch_dir" -name "*.py" | wc -l)
+            echo "分支 $branch_name: $file_count 个文件"
+          fi
+        done
+      fi
+  
+  artifacts:
+    # 保存渲染结果作为构建产物
+    paths:
+      - rendered/
+    expire_in: 30 days
+    reports:
+      # 生成渲染报告
+      junit: rendered/render_report.xml
+    when: always
+  
+  # 缓存Python依赖
+  cache:
+    key: ${CI_COMMIT_REF_SLUG}
+    paths:
+      - .pip-cache/
+    policy: pull-push
+
+# 可选：手动触发所有分支渲染
+render_all_manual:
+  stage: render
+  image: python:${PYTHON_VERSION}-slim
+  
+  # 仅手动触发
+  rules:
+    - when: manual
+      allow_failure: true
+  
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git
+    - pip install --upgrade pip
+    - pip install -r requirements.txt
+  
+  script:
+    - |
+      echo "手动渲染所有分支的模板..."
+      python scripts/render_templates.py --all --debug
+  
+  artifacts:
+    paths:
+      - rendered/
+    expire_in: 7 days
+    when: always
+
+# 可选：验证模板语法
+validate_templates:
+  stage: render
+  image: python:${PYTHON_VERSION}-slim
+  
+  rules:
+    - changes:
+        - "templates/**/*.j2"
+        - "envs/*.json"
+      when: always
+  
+  before_script:
+    - pip install --upgrade pip
+    - pip install jinja2 jsonschema
+  
+  script:
+    # 验证JSON配置文件格式
+    - |
+      echo "验证环境配置文件..."
+      for config_file in envs/*.json; do
+        if [ -f "$config_file" ]; then
+          echo "验证 $config_file"
+          python -m json.tool "$config_file" > /dev/null
+          if [ $? -eq 0 ]; then
+            echo "✓ $config_file 格式正确"
+          else
+            echo "✗ $config_file 格式错误"
+            exit 1
+          fi
+        fi
+      done
+    
+    # 验证模板语法
+    - |
+      echo "验证模板语法..."
+      python -c "
+      import os
+      from jinja2 import Environment, FileSystemLoader, TemplateSyntaxError
+      
+      template_dir = 'templates'
+      if os.path.exists(template_dir):
+          env = Environment(loader=FileSystemLoader(template_dir))
+          
+          for root, dirs, files in os.walk(template_dir):
+              for file in files:
+                  if file.endswith('.j2'):
+                      template_path = os.path.relpath(os.path.join(root, file), template_dir)
+                      try:
+                          template = env.get_template(template_path)
+                          print(f'✓ {template_path} 语法正确')
+                      except TemplateSyntaxError as e:
+                          print(f'✗ {template_path} 语法错误: {e}')
+                          exit(1)
+                      except Exception as e:
+                          print(f'✗ {template_path} 验证失败: {e}')
+                          exit(1)
+      else:
+          print('templates目录不存在')
+      "
+  
+  allow_failure: false

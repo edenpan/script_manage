@@ -1,0 +1,246 @@
+name: 运行测试
+
+on:
+  push:
+    branches: [dev, sit, master, main]
+  pull_request:
+    branches: [dev, sit, master, main]
+  
+  # 允许手动触发测试
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.9'
+
+jobs:
+  test:
+    name: 运行单元测试
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: 设置Python环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: 安装依赖
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: 运行测试
+      run: |
+        echo "🚀 开始运行测试..."
+        python test_render.py
+    
+    - name: 验证项目结构
+      run: |
+        echo "📁 验证项目结构..."
+        
+        # 检查必要的目录
+        if [ ! -d "templates" ]; then
+          echo "❌ templates目录不存在"
+          exit 1
+        fi
+        
+        if [ ! -d "envs" ]; then
+          echo "❌ envs目录不存在"
+          exit 1
+        fi
+        
+        if [ ! -d "scripts" ]; then
+          echo "❌ scripts目录不存在"
+          exit 1
+        fi
+        
+        echo "✅ 项目结构验证通过"
+    
+    - name: 检查代码质量
+      run: |
+        echo "🔍 检查代码质量..."
+        
+        # 检查Python语法
+        python -m py_compile test_render.py
+        python -m py_compile scripts/render_templates.py
+        
+        echo "✅ 代码语法检查通过"
+    
+    - name: 生成测试报告
+      if: always()
+      run: |
+        echo "📊 生成测试报告..."
+        echo "分支: ${GITHUB_REF#refs/heads/}"
+        echo "提交: $GITHUB_SHA"
+        echo "运行时间: $(date)"
+        
+        # 检查是否有渲染文件生成
+        if [ -d "rendered" ]; then
+          echo "📁 渲染文件目录存在"
+          find rendered -name "*.py" | wc -l | xargs echo "生成的Python文件数量:"
+        else
+          echo "📁 没有渲染文件目录"
+        fi
+
+  # 集成测试 - 测试完整的渲染流程
+  integration-test:
+    name: 集成测试
+    runs-on: ubuntu-latest
+    needs: test
+    
+    strategy:
+      matrix:
+        branch: [dev, sit, master]
+    
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+    
+    - name: 设置Python环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: 安装依赖
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: 测试分支渲染
+      run: |
+        echo "🧪 测试 ${{ matrix.branch }} 分支渲染..."
+        
+        # 检查环境配置文件是否存在
+        if [ ! -f "envs/${{ matrix.branch }}.json" ]; then
+          echo "❌ 环境配置文件 envs/${{ matrix.branch }}.json 不存在"
+          exit 1
+        fi
+        
+        # 运行渲染脚本
+        python scripts/render_templates.py --branch ${{ matrix.branch }} --debug
+        
+        # 检查渲染结果
+        if [ -d "rendered/${{ matrix.branch }}" ]; then
+          file_count=$(find "rendered/${{ matrix.branch }}" -name "*.py" | wc -l)
+          echo "✅ 成功生成 $file_count 个文件"
+          
+          # 列出生成的文件
+          echo "生成的文件列表:"
+          find "rendered/${{ matrix.branch }}" -name "*.py" -exec basename {} \;
+        else
+          echo "❌ 没有生成渲染文件"
+          exit 1
+        fi
+    
+    - name: 验证生成的Python文件
+      run: |
+        echo "🔍 验证生成的Python文件语法..."
+        
+        if [ -d "rendered/${{ matrix.branch }}" ]; then
+          for py_file in rendered/${{ matrix.branch }}/*.py; do
+            if [ -f "$py_file" ]; then
+              echo "检查文件: $py_file"
+              python -m py_compile "$py_file"
+              echo "✅ $py_file 语法正确"
+            fi
+          done
+        fi
+    
+    - name: 上传渲染结果
+      uses: actions/upload-artifact@v4
+      with:
+        name: rendered-${{ matrix.branch }}-${{ github.sha }}
+        path: rendered/${{ matrix.branch }}/
+        retention-days: 7
+
+  # 性能测试
+  performance-test:
+    name: 性能测试
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+    
+    - name: 设置Python环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: 安装依赖
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: 性能基准测试
+      run: |
+        echo "⏱️  开始性能测试..."
+        
+        # 记录开始时间
+        start_time=$(date +%s)
+        
+        # 运行所有分支的渲染
+        python scripts/render_templates.py --all --debug
+        
+        # 记录结束时间
+        end_time=$(date +%s)
+        duration=$((end_time - start_time))
+        
+        echo "✅ 渲染完成，耗时: ${duration} 秒"
+        
+        # 统计生成的文件
+        total_files=0
+        for branch in dev sit master; do
+          if [ -d "rendered/$branch" ]; then
+            count=$(find "rendered/$branch" -name "*.py" | wc -l)
+            echo "分支 $branch: $count 个文件"
+            total_files=$((total_files + count))
+          fi
+        done
+        
+        echo "总计生成文件: $total_files 个"
+        
+        # 性能指标
+        if [ $duration -gt 30 ]; then
+          echo "⚠️  渲染时间超过30秒，可能存在性能问题"
+        else
+          echo "✅ 渲染性能良好"
+        fi
+
+  # 通知任务
+  notify:
+    name: 测试结果通知
+    runs-on: ubuntu-latest
+    needs: [test, integration-test, performance-test]
+    if: always()
+    
+    steps:
+    - name: 测试成功通知
+      if: needs.test.result == 'success' && needs.integration-test.result == 'success' && needs.performance-test.result == 'success'
+      run: |
+        echo "🎉 所有测试都通过了！"
+        echo "✅ 单元测试: 通过"
+        echo "✅ 集成测试: 通过"
+        echo "✅ 性能测试: 通过"
+        echo "分支: ${GITHUB_REF#refs/heads/}"
+        echo "提交: $GITHUB_SHA"
+    
+    - name: 测试失败通知
+      if: needs.test.result == 'failure' || needs.integration-test.result == 'failure' || needs.performance-test.result == 'failure'
+      run: |
+        echo "❌ 测试失败！"
+        echo "单元测试: ${{ needs.test.result }}"
+        echo "集成测试: ${{ needs.integration-test.result }}"
+        echo "性能测试: ${{ needs.performance-test.result }}"
+        echo "分支: ${GITHUB_REF#refs/heads/}"
+        echo "提交: $GITHUB_SHA"
+        echo "请检查测试日志获取详细信息"
+        exit 1

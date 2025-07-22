@@ -1,0 +1,68 @@
+# 高级GitLab CI配置 - 支持自动提交渲染结果
+
+stages:
+  - render
+  - commit
+
+variables:
+  PYTHON_VERSION: "3.9"
+  GIT_STRATEGY: clone
+  GIT_DEPTH: 0
+
+render_templates:
+  stage: render
+  image: python:${PYTHON_VERSION}-slim
+  
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^(dev|sit|master)$/'
+      changes:
+        - "templates/**/*.j2"
+      when: always
+  
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq git
+    - pip install --upgrade pip
+    - pip install -r requirements.txt
+    - git config --global user.email "ci@gitlab.com"
+    - git config --global user.name "GitLab CI"
+  
+  script:
+    - python scripts/render_templates.py --auto --debug
+  
+  artifacts:
+    paths:
+      - rendered/
+    expire_in: 30 days
+    when: always
+
+# 可选：自动提交渲染结果
+commit_rendered_files:
+  stage: commit
+  image: alpine/git:latest
+  
+  rules:
+    - if: '$CI_COMMIT_BRANCH =~ /^(dev|sit|master)$/ && $AUTO_COMMIT_ENABLED == "true"'
+      when: on_success
+  
+  before_script:
+    - git config --global user.email "ci@gitlab.com"
+    - git config --global user.name "GitLab CI"
+    - git remote set-url origin https://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git
+  
+  script:
+    - |
+      if [ -d "rendered" ] && [ "$(find rendered -name '*.py' | wc -l)" -gt 0 ]; then
+        git add rendered/
+        if ! git diff --cached --quiet; then
+          git commit -m "自动渲染模板文件 [skip ci]"
+          git push origin HEAD:${CI_COMMIT_REF_NAME}
+          echo "✅ 渲染结果已自动提交"
+        else
+          echo "ℹ️ 没有检测到渲染文件变更"
+        fi
+      else
+        echo "ℹ️ 没有生成渲染文件"
+      fi
+  
+  dependencies:
+    - render_templates

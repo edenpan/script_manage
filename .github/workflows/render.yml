@@ -1,0 +1,235 @@
+name: Jinja2 Template Renderer
+
+on:
+  push:
+    branches: [dev, sit, master]
+    paths:
+      - 'templates/**/*.j2'
+  
+  # 允许手动触发
+  workflow_dispatch:
+    inputs:
+      render_all:
+        description: '渲染所有分支的模板'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  PYTHON_VERSION: '3.9'
+
+jobs:
+  # 验证模板和配置文件
+  validate:
+    name: 验证模板语法
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # 获取完整历史用于diff比较
+    
+    - name: 设置Python环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: 安装依赖
+      run: |
+        pip install --upgrade pip
+        pip install jinja2 jsonschema
+    
+    - name: 验证JSON配置文件
+      run: |
+        echo "验证环境配置文件..."
+        for config_file in envs/*.json; do
+          if [ -f "$config_file" ]; then
+            echo "验证 $config_file"
+            python -m json.tool "$config_file" > /dev/null
+            if [ $? -eq 0 ]; then
+              echo "✓ $config_file 格式正确"
+            else
+              echo "✗ $config_file 格式错误"
+              exit 1
+            fi
+          fi
+        done
+    
+    - name: 验证模板语法
+      run: |
+        echo "验证模板语法..."
+        python -c "
+        import os
+        from jinja2 import Environment, FileSystemLoader, TemplateSyntaxError
+        
+        template_dir = 'templates'
+        if os.path.exists(template_dir):
+            env = Environment(loader=FileSystemLoader(template_dir))
+            
+            for root, dirs, files in os.walk(template_dir):
+                for file in files:
+                    if file.endswith('.j2'):
+                        template_path = os.path.relpath(os.path.join(root, file), template_dir)
+                        try:
+                            template = env.get_template(template_path)
+                            print(f'✓ {template_path} 语法正确')
+                        except TemplateSyntaxError as e:
+                            print(f'✗ {template_path} 语法错误: {e}')
+                            exit(1)
+                        except Exception as e:
+                            print(f'✗ {template_path} 验证失败: {e}')
+                            exit(1)
+        else:
+            print('templates目录不存在')
+        "
+
+  # 渲染模板
+  render:
+    name: 渲染模板
+    runs-on: ubuntu-latest
+    needs: validate
+    
+    steps:
+    - name: 检出代码
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # 获取完整历史用于diff比较
+    
+    - name: 设置Python环境
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: 安装依赖
+      run: |
+        pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: 检查项目结构
+      run: |
+        echo "检查项目结构..."
+        if [ ! -d "templates" ]; then
+          echo "错误: templates目录不存在"
+          exit 1
+        fi
+        
+        if [ ! -d "envs" ]; then
+          echo "错误: envs目录不存在"
+          exit 1
+        fi
+        
+        # 获取当前分支名
+        CURRENT_BRANCH=${GITHUB_REF#refs/heads/}
+        echo "当前分支: $CURRENT_BRANCH"
+        
+        # 检查当前分支的环境配置文件是否存在
+        if [ ! -f "envs/${CURRENT_BRANCH}.json" ]; then
+          echo "错误: 环境配置文件 envs/${CURRENT_BRANCH}.json 不存在"
+          exit 1
+        fi
+    
+    - name: 渲染模板 (自动模式)
+      if: github.event_name == 'push'
+      run: |
+        echo "开始自动渲染模板..."
+        python scripts/render_templates.py --auto --debug
+        
+        # 获取当前分支名
+        CURRENT_BRANCH=${GITHUB_REF#refs/heads/}
+        
+        # 检查是否有渲染结果
+        if [ -d "rendered/${CURRENT_BRANCH}" ] && [ "$(ls -A rendered/${CURRENT_BRANCH})" ]; then
+          echo "模板渲染成功，生成的文件："
+          ls -la rendered/${CURRENT_BRANCH}/
+        else
+          echo "没有生成渲染文件"
+        fi
+    
+    - name: 渲染所有模板 (手动模式)
+      if: github.event_name == 'workflow_dispatch' && github.event.inputs.render_all == 'true'
+      run: |
+        echo "手动渲染所有分支的模板..."
+        python scripts/render_templates.py --all --debug
+    
+    - name: 渲染当前分支模板 (手动模式)
+      if: github.event_name == 'workflow_dispatch' && github.event.inputs.render_all != 'true'
+      run: |
+        CURRENT_BRANCH=${GITHUB_REF#refs/heads/}
+        echo "手动渲染当前分支 $CURRENT_BRANCH 的模板..."
+        python scripts/render_templates.py --branch $CURRENT_BRANCH --debug
+    
+    - name: 生成渲染报告
+      if: always()
+      run: |
+        echo "=== 渲染结果统计 ==="
+        if [ -d "rendered" ]; then
+          for branch_dir in rendered/*/; do
+            if [ -d "$branch_dir" ]; then
+              branch_name=$(basename "$branch_dir")
+              file_count=$(find "$branch_dir" -name "*.py" | wc -l)
+              echo "分支 $branch_name: $file_count 个文件"
+            fi
+          done
+        else
+          echo "没有生成渲染文件"
+        fi
+    
+    - name: 上传渲染结果
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: rendered-templates-${{ github.sha }}
+        path: rendered/
+        retention-days: 30
+    
+    - name: 提交渲染结果 (可选)
+      if: success() && github.event_name == 'push'
+      run: |
+        # 配置Git
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        
+        # 检查是否有新的渲染文件
+        if [ -d "rendered" ] && [ "$(find rendered -name '*.py' | wc -l)" -gt 0 ]; then
+          git add rendered/
+          
+          # 检查是否有变更需要提交
+          if ! git diff --cached --quiet; then
+            git commit -m "自动渲染模板文件 [skip ci]"
+            
+            # 推送变更 (需要配置适当的权限)
+            # git push
+            echo "检测到渲染文件变更，但跳过自动提交"
+            echo "如需自动提交，请配置适当的GitHub Token权限"
+          else
+            echo "没有检测到渲染文件变更"
+          fi
+        else
+          echo "没有生成渲染文件"
+        fi
+
+  # 通知任务 (可选)
+  notify:
+    name: 发送通知
+    runs-on: ubuntu-latest
+    needs: [validate, render]
+    if: always()
+    
+    steps:
+    - name: 发送成功通知
+      if: needs.render.result == 'success'
+      run: |
+        echo "✅ 模板渲染成功完成"
+        echo "分支: ${GITHUB_REF#refs/heads/}"
+        echo "提交: $GITHUB_SHA"
+    
+    - name: 发送失败通知
+      if: needs.render.result == 'failure'
+      run: |
+        echo "❌ 模板渲染失败"
+        echo "分支: ${GITHUB_REF#refs/heads/}"
+        echo "提交: $GITHUB_SHA"
+        echo "请检查日志获取详细错误信息"
