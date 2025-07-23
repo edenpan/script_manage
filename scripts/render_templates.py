@@ -87,8 +87,8 @@ class TemplateRenderer:
             self.logger.error(f"获取当前分支失败: {e}")
             return ""
     
-    def get_added_j2_files(self) -> List[str]:
-        """获取最近提交中新增的.j2文件列表"""
+    def get_changed_j2_files(self) -> List[str]:
+        """获取最近提交中变更的.j2文件列表（包括新增和修改）"""
         try:
             repo = git.Repo(self.project_root)
             
@@ -100,19 +100,19 @@ class TemplateRenderer:
                 # 比较最近两次提交
                 diff = repo.head.commit.diff('HEAD~1')
             
-            added_j2_files = []
+            changed_j2_files = []
             for item in diff:
-                # 检查是否为新增文件且为.j2文件
-                if item.change_type == 'A' and item.a_path.endswith('.j2'):
+                # 检查是否为新增或修改的.j2文件
+                if item.change_type in ['A', 'M'] and item.a_path and item.a_path.endswith('.j2'):
                     # 确保文件在templates目录下
                     if item.a_path.startswith('templates/'):
-                        added_j2_files.append(item.a_path)
+                        changed_j2_files.append(item.a_path)
             
-            self.logger.info(f"检测到新增的.j2文件: {added_j2_files}")
-            return added_j2_files
+            self.logger.info(f"检测到变更的.j2文件: {changed_j2_files}")
+            return changed_j2_files
             
         except Exception as e:
-            self.logger.error(f"获取新增.j2文件失败: {e}")
+            self.logger.error(f"获取变更.j2文件失败: {e}")
             return []
     
     def load_env_config(self, branch: str) -> Dict[str, Any]:
@@ -279,15 +279,15 @@ class TemplateRenderer:
             self.logger.info(f"当前分支 {current_branch} 不在支持列表中，跳过渲染")
             return True
         
-        # 获取新增的.j2文件
-        added_j2_files = self.get_added_j2_files()
+        # 获取变更的.j2文件
+        changed_j2_files = self.get_changed_j2_files()
         
-        if not added_j2_files:
-            self.logger.info("没有检测到新增的.j2文件，跳过渲染")
+        if not changed_j2_files:
+            self.logger.info("没有检测到变更的.j2文件，跳过渲染")
             return True
         
-        # 渲染新增的模板文件
-        rendered_count = self.render_templates_for_branch(current_branch, added_j2_files)
+        # 渲染变更的模板文件
+        rendered_count = self.render_templates_for_branch(current_branch, changed_j2_files)
         
         return rendered_count > 0
     
