@@ -178,8 +178,23 @@ class TemplateRenderer:
             渲染后的内容
         """
         try:
-            # 获取相对于templates目录的模板路径
-            relative_path = str(Path(template_path).relative_to(self.templates_dir))
+            # 处理模板路径，确保获取正确的相对路径
+            template_path_obj = Path(template_path)
+            
+            # 如果是绝对路径，获取相对于templates目录的路径
+            if template_path_obj.is_absolute():
+                if template_path_obj.is_relative_to(self.templates_dir):
+                    relative_path = str(template_path_obj.relative_to(self.templates_dir))
+                else:
+                    raise ValueError(f"模板文件不在templates目录下: {template_path}")
+            else:
+                # 如果是相对路径，检查是否以templates/开头
+                if template_path.startswith('templates/'):
+                    # 去掉templates/前缀
+                    relative_path = template_path[10:]  # len('templates/') = 10
+                else:
+                    # 假设已经是相对于templates目录的路径
+                    relative_path = template_path
             
             # 加载模板
             template = self.jinja_env.get_template(relative_path)
