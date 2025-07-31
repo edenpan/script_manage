@@ -1,0 +1,356 @@
+# GitLab CI/CD Pipeline 配置
+# 转换自 GitHub Actions workflows: test.yml 和 render.yml
+
+stages:
+  - validate
+  - test
+  - integration-test
+  - performance-test
+  - render
+  - notify
+
+variables:
+  PYTHON_VERSION: "3.9"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+# 缓存配置
+cache:
+  paths:
+    - .cache/pip/
+    - venv/
+
+# 模板：Python环境设置
+.python_setup: &python_setup
+  image: python:${PYTHON_VERSION}
+  before_script:
+    - python --version
+    - pip install --upgrade pip
+    - pip install -r requirements.txt
+
+# 验证阶段
+validate_templates:
+  stage: validate
+  <<: *python_setup
+  script:
+    - echo "验证环境配置文件..."
+    - |
+      for config_file in envs/*.json; do
+        if [ -f "$config_file" ]; then
+          echo "验证 $config_file"
+          python -m json.tool "$config_file" > /dev/null
+          if [ $? -eq 0 ]; then
+            echo "✓ $config_file 格式正确"
+          else
+            echo "✗ $config_file 格式错误"
+            exit 1
+          fi
+        fi
+      done
+    - echo "验证模板语法..."
+    - |
+      python -c "
+      import os
+      from jinja2 import Environment, FileSystemLoader, TemplateSyntaxError
+      
+      template_dir = 'templates'
+      if os.path.exists(template_dir):
+          env = Environment(loader=FileSystemLoader(template_dir))
+          
+          for root, dirs, files in os.walk(template_dir):
+              for file in files:
+                  if file.endswith('.j2'):
+                      template_path = os.path.relpath(os.path.join(root, file), template_dir)
+                      try:
+                          template = env.get_template(template_path)
+                          print(f'✓ {template_path} 语法正确')
+                      except TemplateSyntaxError as e:
+                          print(f'✗ {template_path} 语法错误: {e}')
+                          exit(1)
+                      except Exception as e:
+                          print(f'✗ {template_path} 验证失败: {e}')
+                          exit(1)
+      else:
+          print('templates目录不存在')
+      "
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+      changes:
+        - "templates/**/*.j2"
+        - "envs/*.json"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+# 单元测试
+unit_test:
+  stage: test
+  <<: *python_setup
+  script:
+    - echo "🚀 开始运行测试..."
+    - python test_render.py
+    - echo "📁 验证项目结构..."
+    - |
+      # 检查必要的目录
+      if [ ! -d "templates" ]; then
+        echo "❌ templates目录不存在"
+        exit 1
+      fi
+      
+      if [ ! -d "envs" ]; then
+        echo "❌ envs目录不存在"
+        exit 1
+      fi
+      
+      if [ ! -d "scripts" ]; then
+        echo "❌ scripts目录不存在"
+        exit 1
+      fi
+      
+      echo "✅ 项目结构验证通过"
+    - echo "🔍 检查代码质量..."
+    - |
+      # 检查Python语法
+      python -m py_compile test_render.py
+      python -m py_compile scripts/render_templates.py
+      
+      echo "✅ 代码语法检查通过"
+  after_script:
+    - echo "📊 生成测试报告..."
+    - echo "分支: $CI_COMMIT_REF_NAME"
+    - echo "提交: $CI_COMMIT_SHA"
+    - echo "运行时间: $(date)"
+    - |
+      # 检查是否有渲染文件生成
+      if [ -d "rendered" ]; then
+        echo "📁 渲染文件目录存在"
+        find rendered -name "*.py" | wc -l | xargs echo "生成的Python文件数量:"
+      else
+        echo "📁 没有渲染文件目录"
+      fi
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_REF_NAME == "dev" || $CI_COMMIT_REF_NAME == "sit" || $CI_COMMIT_REF_NAME == "master" || $CI_COMMIT_REF_NAME == "main")
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+# 集成测试 - 并行测试多个分支
+integration_test:
+  stage: integration-test
+  <<: *python_setup
+  parallel:
+    matrix:
+      - BRANCH: [dev, sit, master]
+  script:
+    - echo "🧪 测试 $BRANCH 分支渲染..."
+    - |
+      # 检查环境配置文件是否存在
+      if [ ! -f "envs/$BRANCH.json" ]; then
+        echo "❌ 环境配置文件 envs/$BRANCH.json 不存在"
+        exit 1
+      fi
+      
+      # 运行渲染脚本
+      python scripts/render_templates.py --branch $BRANCH --debug
+      
+      # 检查渲染结果
+      if [ -d "rendered/$BRANCH" ]; then
+        file_count=$(find "rendered/$BRANCH" -name "*.py" | wc -l)
+        echo "✅ 成功生成 $file_count 个文件"
+        
+        # 列出生成的文件
+        echo "生成的文件列表:"
+        find "rendered/$BRANCH" -name "*.py" -exec basename {} \;
+      else
+        echo "❌ 没有生成渲染文件"
+        exit 1
+      fi
+    - echo "🔍 验证生成的Python文件语法..."
+    - |
+      if [ -d "rendered/$BRANCH" ]; then
+        for py_file in rendered/$BRANCH/*.py; do
+          if [ -f "$py_file" ]; then
+            echo "检查文件: $py_file"
+            python -m py_compile "$py_file"
+            echo "✅ $py_file 语法正确"
+          fi
+        done
+      fi
+  artifacts:
+    name: "rendered-$BRANCH-$CI_COMMIT_SHA"
+    paths:
+      - rendered/$BRANCH/
+    expire_in: 7 days
+  needs: ["unit_test"]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_REF_NAME == "dev" || $CI_COMMIT_REF_NAME == "sit" || $CI_COMMIT_REF_NAME == "master" || $CI_COMMIT_REF_NAME == "main")
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+# 性能测试
+performance_test:
+  stage: performance-test
+  <<: *python_setup
+  script:
+    - echo "⏱️  开始性能测试..."
+    - |
+      # 记录开始时间
+      start_time=$(date +%s)
+      
+      # 运行所有分支的渲染
+      python scripts/render_templates.py --all --debug
+      
+      # 记录结束时间
+      end_time=$(date +%s)
+      duration=$((end_time - start_time))
+      
+      echo "✅ 渲染完成，耗时: ${duration} 秒"
+      
+      # 统计生成的文件
+      total_files=0
+      for branch in dev sit master; do
+        if [ -d "rendered/$branch" ]; then
+          count=$(find "rendered/$branch" -name "*.py" | wc -l)
+          echo "分支 $branch: $count 个文件"
+          total_files=$((total_files + count))
+        fi
+      done
+      
+      echo "总计生成文件: $total_files 个"
+      
+      # 性能指标
+      if [ $duration -gt 30 ]; then
+        echo "⚠️  渲染时间超过30秒，可能存在性能问题"
+      else
+        echo "✅ 渲染性能良好"
+      fi
+  needs: ["unit_test"]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_REF_NAME == "dev" || $CI_COMMIT_REF_NAME == "sit" || $CI_COMMIT_REF_NAME == "master" || $CI_COMMIT_REF_NAME == "main")
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+# 渲染模板
+render_templates:
+  stage: render
+  <<: *python_setup
+  script:
+    - echo "检查项目结构..."
+    - |
+      if [ ! -d "templates" ]; then
+        echo "错误: templates目录不存在"
+        exit 1
+      fi
+      
+      if [ ! -d "envs" ]; then
+        echo "错误: envs目录不存在"
+        exit 1
+      fi
+      
+      # 获取当前分支名
+      CURRENT_BRANCH=$CI_COMMIT_REF_NAME
+      echo "当前分支: $CURRENT_BRANCH"
+      
+      # 检查当前分支的环境配置文件是否存在
+      if [ ! -f "envs/${CURRENT_BRANCH}.json" ]; then
+        echo "错误: 环境配置文件 envs/${CURRENT_BRANCH}.json 不存在"
+        exit 1
+      fi
+    - |
+      # 根据触发方式选择渲染模式
+      if [ "$RENDER_ALL" = "true" ]; then
+        echo "手动渲染所有分支的模板..."
+        python scripts/render_templates.py --all --debug
+      else
+        echo "开始渲染当前分支模板..."
+        python scripts/render_templates.py --auto --debug
+        
+        # 检查是否有渲染结果
+        if [ -d "rendered/${CI_COMMIT_REF_NAME}" ] && [ "$(ls -A rendered/${CI_COMMIT_REF_NAME})" ]; then
+          echo "模板渲染成功，生成的文件："
+          ls -la rendered/${CI_COMMIT_REF_NAME}/
+        else
+          echo "没有生成渲染文件"
+        fi
+      fi
+    - echo "=== 渲染结果统计 ==="
+    - |
+      if [ -d "rendered" ]; then
+        for branch_dir in rendered/*/; do
+          if [ -d "$branch_dir" ]; then
+            branch_name=$(basename "$branch_dir")
+            file_count=$(find "$branch_dir" -name "*.py" | wc -l)
+            echo "分支 $branch_name: $file_count 个文件"
+          fi
+        done
+      else
+        echo "没有生成渲染文件"
+      fi
+  artifacts:
+    name: "rendered-templates-$CI_COMMIT_SHA"
+    paths:
+      - rendered/
+    expire_in: 30 days
+  needs: ["validate_templates"]
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_REF_NAME == "dev" || $CI_COMMIT_REF_NAME == "sit" || $CI_COMMIT_REF_NAME == "master")
+      changes:
+        - "templates/**/*.j2"
+    - if: $CI_PIPELINE_SOURCE == "web"
+      variables:
+        RENDER_ALL: "true"
+
+# 通知任务 - 测试结果
+notify_test_results:
+  stage: notify
+  image: alpine:latest
+  script:
+    - |
+      if [ "$CI_JOB_STATUS" = "success" ]; then
+        echo "🎉 所有测试都通过了！"
+        echo "✅ 单元测试: 通过"
+        echo "✅ 集成测试: 通过"
+        echo "✅ 性能测试: 通过"
+        echo "分支: $CI_COMMIT_REF_NAME"
+        echo "提交: $CI_COMMIT_SHA"
+      else
+        echo "❌ 测试失败！"
+        echo "分支: $CI_COMMIT_REF_NAME"
+        echo "提交: $CI_COMMIT_SHA"
+        echo "请检查测试日志获取详细信息"
+        exit 1
+      fi
+  needs: 
+    - job: unit_test
+      optional: true
+    - job: integration_test
+      optional: true
+    - job: performance_test
+      optional: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_REF_NAME == "dev" || $CI_COMMIT_REF_NAME == "sit" || $CI_COMMIT_REF_NAME == "master" || $CI_COMMIT_REF_NAME == "main")
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+  when: always
+
+# 通知任务 - 渲染结果
+notify_render_results:
+  stage: notify
+  image: alpine:latest
+  script:
+    - |
+      if [ "$CI_JOB_STATUS" = "success" ]; then
+        echo "✅ 模板渲染成功完成"
+        echo "分支: $CI_COMMIT_REF_NAME"
+        echo "提交: $CI_COMMIT_SHA"
+      else
+        echo "❌ 模板渲染失败"
+        echo "分支: $CI_COMMIT_REF_NAME"
+        echo "提交: $CI_COMMIT_SHA"
+        echo "请检查日志获取详细错误信息"
+      fi
+  needs: 
+    - job: render_templates
+      optional: true
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push" && ($CI_COMMIT_REF_NAME == "dev" || $CI_COMMIT_REF_NAME == "sit" || $CI_COMMIT_REF_NAME == "master")
+      changes:
+        - "templates/**/*.j2"
+    - if: $CI_PIPELINE_SOURCE == "web"
+  when: always
